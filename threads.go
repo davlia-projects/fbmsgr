@@ -11,6 +11,7 @@ import (
 
 const actionBufferSize = 500
 const actionLogDocID = "1547392382048831"
+const threadDocID = "1349387578499440"
 
 // ThreadInfo stores information about a chat thread.
 // A chat thread is facebook's internal name for a
@@ -72,6 +73,35 @@ type ThreadListResult struct {
 // to fetch, starting at 0.
 // The limit specifies the maximum number of threads.
 func (s *Session) Threads(offset, limit int) (res *ThreadListResult, err error) {
+	defer essentials.AddCtxTo("fbmsgr: threads", &err)
+
+	params := map[string]interface{}{
+		"limit": limit,
+		"tags":  []string{},
+		"includeDeliveryReceipts": true,
+		"includeSeqID":            false,
+	}
+
+	var respObj struct {
+		Payload ThreadListResult `json:"payload"`
+	}
+
+	s.graphQLDoc(threadDocID, params, &respObj)
+	for _, x := range respObj.Payload.Participants {
+		x.FBID = stripFBIDPrefix(x.FBID)
+	}
+	for _, x := range respObj.Payload.Threads {
+		x.canonicalizeFBIDs()
+	}
+
+	return &respObj.Payload, nil
+}
+
+// Threads reads a range of the user's chat threads.
+// The offset specifiecs the index of the first thread
+// to fetch, starting at 0.
+// The limit specifies the maximum number of threads.
+func (s *Session) ThreadsDeprecated(offset, limit int) (res *ThreadListResult, err error) {
 	defer essentials.AddCtxTo("fbmsgr: threads", &err)
 	params, err := s.commonParams()
 	if err != nil {
