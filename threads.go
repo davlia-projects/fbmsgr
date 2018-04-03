@@ -153,6 +153,26 @@ type ThreadListResult struct {
 	Participants []*ParticipantInfo `json:"participants"`
 }
 
+func (s *Session) Thread(threadID string) (res *ThreadInfo, err error) {
+	defer essentials.AddCtxTo("fbmsgr: thread", &err)
+
+	params := map[string]interface{}{
+		"id":                 threadID,
+		"before":             nil,
+		"message_limit":      0,
+		"load_messages":      0,
+		"load_read_receipts": false,
+	}
+
+	var respObj struct {
+		MessageThread *ThreadResponse `json:"message_thread"`
+	}
+
+	s.graphQLDoc("1498317363570230", params, &respObj)
+	thread := marshalThreadInfo(respObj.MessageThread)
+	return thread, nil
+}
+
 // Threads reads a range of the user's chat threads.
 // The offset specifiecs the index of the first thread
 // to fetch, starting at 0.
@@ -177,7 +197,7 @@ func (s *Session) Threads(offset, limit int) (res *ThreadListResult, err error) 
 	}
 
 	s.graphQLDoc(threadDocID, params, &respObj)
-	threads := marshalThreadInfo(respObj.Viewer.MessageThreads.Threads)
+	threads := marshalThreadList(respObj.Viewer.MessageThreads.Threads)
 
 	result := &ThreadListResult{
 		Threads:      threads,
@@ -189,41 +209,45 @@ func (s *Session) Threads(offset, limit int) (res *ThreadListResult, err error) 
 	return result, nil
 }
 
-func marshalThreadInfo(respObj []*ThreadResponse) []*ThreadInfo {
+func marshalThreadList(respObj []*ThreadResponse) []*ThreadInfo {
 	out := []*ThreadInfo{}
 	for _, resp := range respObj {
-		participantIDs := []string{}
-		for _, participant := range resp.AllParticipants.Nodes {
-			participantIDs = append(participantIDs, participant.MessagingActor.ID)
-		}
-
-		threadInfo := &ThreadInfo{
-			ThreadID:      "",
-			ThreadFBID:    resp.ThreadKey.ThreadFbid,
-			OtherUserFBID: &resp.ThreadKey.OtherUserID,
-			Participants:  participantIDs,
-			UnreadCount:   resp.UnreadCount,
-			MessageCount:  resp.MessagesCount,
-		}
-		if resp.Name == "" {
-			threadInfo.Name = resp.AllParticipants.Nodes[0].MessagingActor.Name
-		} else {
-			threadInfo.Name = resp.Name
-		}
-		if len(resp.LastMessage.Nodes) > 0 {
-			node := resp.LastMessage.Nodes[0]
-			threadInfo.Snippet = node.Snippet
-			threadInfo.SnippetSender = node.MessageSender.MessagingActor.ID
-			timestamp, err := strconv.ParseFloat(node.TimestampPrecise, 64)
-			if err != nil {
-				timestamp = 0
-			}
-			threadInfo.Timestamp = timestamp
-			threadInfo.ServerTimestamp = timestamp
-		}
-		out = append(out, threadInfo)
+		out = append(out, marshalThreadInfo(resp))
 	}
 	return out
+}
+
+func marshalThreadInfo(resp *ThreadResponse) *ThreadInfo {
+	participantIDs := []string{}
+	for _, participant := range resp.AllParticipants.Nodes {
+		participantIDs = append(participantIDs, participant.MessagingActor.ID)
+	}
+
+	threadInfo := &ThreadInfo{
+		ThreadID:      "",
+		ThreadFBID:    resp.ThreadKey.ThreadFbid,
+		OtherUserFBID: &resp.ThreadKey.OtherUserID,
+		Participants:  participantIDs,
+		UnreadCount:   resp.UnreadCount,
+		MessageCount:  resp.MessagesCount,
+	}
+	if resp.Name == "" {
+		threadInfo.Name = resp.AllParticipants.Nodes[0].MessagingActor.Name
+	} else {
+		threadInfo.Name = resp.Name
+	}
+	if len(resp.LastMessage.Nodes) > 0 {
+		node := resp.LastMessage.Nodes[0]
+		threadInfo.Snippet = node.Snippet
+		threadInfo.SnippetSender = node.MessageSender.MessagingActor.ID
+		timestamp, err := strconv.ParseFloat(node.TimestampPrecise, 64)
+		if err != nil {
+			timestamp = 0
+		}
+		threadInfo.Timestamp = timestamp
+		threadInfo.ServerTimestamp = timestamp
+	}
+	return threadInfo
 }
 
 // Threads reads a range of the user's chat threads.
