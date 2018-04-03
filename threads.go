@@ -16,6 +16,91 @@ const threadDocID = "1349387578499440"
 // ThreadInfo stores information about a chat thread.
 // A chat thread is facebook's internal name for a
 // conversation (either a group chat or a 1-on-1).
+
+type ThreadResponse struct {
+	ThreadKey struct {
+		ThreadFbid  string `json:"thread_fbid"`
+		OtherUserID string `json:"other_user_id"`
+	} `json:"thread_key"`
+	Name        string `json:"name"`
+	LastMessage struct {
+		Nodes []struct {
+			Snippet       string `json:"snippet"`
+			MessageSender struct {
+				MessagingActor struct {
+					ID string `json:"id"`
+				} `json:"messaging_actor"`
+			} `json:"message_sender"`
+			TimestampPrecise string `json:"timestamp_precise"`
+		} `json:"nodes"`
+	} `json:"last_message"`
+	UnreadCount        int    `json:"unread_count"`
+	MessagesCount      int    `json:"messages_count"`
+	UpdatedTimePrecise string `json:"updated_time_precise"`
+	IsPinProtected     bool   `json:"is_pin_protected"`
+	IsViewerSubscribed bool   `json:"is_viewer_subscribed"`
+	ThreadQueueEnabled bool   `json:"thread_queue_enabled"`
+	Folder             string `json:"folder"`
+	HasViewerArchived  bool   `json:"has_viewer_archived"`
+	IsPageFollowUp     bool   `json:"is_page_follow_up"`
+	CannotReplyReason  string `json:"cannot_reply_reason"`
+	EphemeralTTLMode   int    `json:"ephemeral_ttl_mode"`
+	EventReminders     struct {
+		Nodes []interface{} `json:"nodes"`
+	} `json:"event_reminders"`
+	MontageThread struct {
+		ID string `json:"id"`
+	} `json:"montage_thread"`
+	LastReadReceipt struct {
+		Nodes []struct {
+			TimestampPrecise string `json:"timestamp_precise"`
+		} `json:"nodes"`
+	} `json:"last_read_receipt"`
+	RelatedPageThread          interface{}   `json:"related_page_thread"`
+	AssociatedObject           interface{}   `json:"associated_object"`
+	PrivacyMode                int           `json:"privacy_mode"`
+	CustomizationEnabled       bool          `json:"customization_enabled"`
+	ThreadType                 string        `json:"thread_type"`
+	ParticipantAddModeAsString interface{}   `json:"participant_add_mode_as_string"`
+	ParticipantsEventStatus    []interface{} `json:"participants_event_status"`
+	AllParticipants            struct {
+		Nodes []struct {
+			MessagingActor struct {
+				ID          string `json:"id"`
+				Typename    string `json:"__typename"`
+				Name        string `json:"name"`
+				Gender      string `json:"gender"`
+				URL         string `json:"url"`
+				BigImageSrc struct {
+					URI string `json:"uri"`
+				} `json:"big_image_src"`
+				ShortName                string      `json:"short_name"`
+				Username                 string      `json:"username"`
+				IsViewerFriend           bool        `json:"is_viewer_friend"`
+				IsMessengerUser          bool        `json:"is_messenger_user"`
+				IsVerified               bool        `json:"is_verified"`
+				IsMessageBlockedByViewer bool        `json:"is_message_blocked_by_viewer"`
+				IsViewerCoworker         bool        `json:"is_viewer_coworker"`
+				IsEmployee               interface{} `json:"is_employee"`
+			} `json:"messaging_actor"`
+		} `json:"nodes"`
+	} `json:"all_participants"`
+	ReadReceipts struct {
+		Nodes []struct {
+			Watermark string `json:"watermark"`
+			Action    string `json:"action"`
+			Actor     struct {
+				ID string `json:"id"`
+			} `json:"actor"`
+		} `json:"nodes"`
+	} `json:"read_receipts"`
+	DeliveryReceipts struct {
+		Nodes []struct {
+			TimestampPrecise string `json:"timestamp_precise"`
+		} `json:"nodes"`
+	} `json:"delivery_receipts"`
+}
+
 type ThreadInfo struct {
 	ThreadID   string `json:"thread_id"`
 	ThreadFBID string `json:"thread_fbid"`
@@ -76,25 +161,69 @@ func (s *Session) Threads(offset, limit int) (res *ThreadListResult, err error) 
 	defer essentials.AddCtxTo("fbmsgr: threads", &err)
 
 	params := map[string]interface{}{
-		"limit": limit,
-		"tags":  []string{},
+		"limit":  limit,
+		"before": nil,
+		"tags":   []string{"INBOX"},
 		"includeDeliveryReceipts": true,
 		"includeSeqID":            false,
 	}
 
 	var respObj struct {
-		Payload ThreadListResult `json:"payload"`
+		Viewer struct {
+			MessageThreads struct {
+				Threads []*ThreadResponse `json:"nodes"`
+			} `json:"message_threads"`
+		} `json:"viewer"`
 	}
 
 	s.graphQLDoc(threadDocID, params, &respObj)
-	for _, x := range respObj.Payload.Participants {
-		x.FBID = stripFBIDPrefix(x.FBID)
-	}
-	for _, x := range respObj.Payload.Threads {
-		x.canonicalizeFBIDs()
-	}
+	threads := marshalThreadInfo(respObj.Viewer.MessageThreads.Threads)
 
-	return &respObj.Payload, nil
+	result := &ThreadListResult{
+		Threads:      threads,
+		Participants: []*ParticipantInfo{},
+	}
+	// TODO: handle participants json
+	// log.Printf("%s\n", respObj)
+
+	return result, nil
+}
+
+func marshalThreadInfo(respObj []*ThreadResponse) []*ThreadInfo {
+	out := []*ThreadInfo{}
+	for _, resp := range respObj {
+		participantIDs := []string{}
+		for _, participant := range resp.AllParticipants.Nodes {
+			participantIDs = append(participantIDs, participant.MessagingActor.ID)
+		}
+
+		threadInfo := &ThreadInfo{
+			ThreadID:      "",
+			ThreadFBID:    resp.ThreadKey.ThreadFbid,
+			OtherUserFBID: &resp.ThreadKey.OtherUserID,
+			Participants:  participantIDs,
+			UnreadCount:   resp.UnreadCount,
+			MessageCount:  resp.MessagesCount,
+		}
+		if resp.Name == "" {
+			threadInfo.Name = resp.AllParticipants.Nodes[0].MessagingActor.Name
+		} else {
+			threadInfo.Name = resp.Name
+		}
+		if len(resp.LastMessage.Nodes) > 0 {
+			node := resp.LastMessage.Nodes[0]
+			threadInfo.Snippet = node.Snippet
+			threadInfo.SnippetSender = node.MessageSender.MessagingActor.ID
+			timestamp, err := strconv.ParseFloat(node.TimestampPrecise, 64)
+			if err != nil {
+				timestamp = 0
+			}
+			threadInfo.Timestamp = timestamp
+			threadInfo.ServerTimestamp = timestamp
+		}
+		out = append(out, threadInfo)
+	}
+	return out
 }
 
 // Threads reads a range of the user's chat threads.

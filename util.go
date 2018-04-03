@@ -91,13 +91,12 @@ func (s *Session) graphQLDoc(docID string, params map[string]interface{},
 	}
 	reqParams.Add("queries", string(reqJSON))
 
-	resp, err := s.client.PostForm(BaseURL+"/api/graphqlbatch", reqParams)
+	resp, err := s.client.PostForm(BaseURL+"/api/graphqlbatch/", reqParams)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	decoder := json.NewDecoder(resp.Body)
-
 	var respObj struct {
 		Object struct {
 			Data   interface{} `json:"data"`
