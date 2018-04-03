@@ -224,7 +224,7 @@ func marshalThreadInfo(resp *ThreadResponse) *ThreadInfo {
 	}
 
 	threadInfo := &ThreadInfo{
-		ThreadID:      "",
+		ThreadID:      resp.ThreadKey.ThreadFbid,
 		ThreadFBID:    resp.ThreadKey.ThreadFbid,
 		OtherUserFBID: &resp.ThreadKey.OtherUserID,
 		Participants:  participantIDs,
