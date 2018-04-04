@@ -173,11 +173,7 @@ func (s *Session) Thread(threadID string) (res *ThreadInfo, err error) {
 	return thread, nil
 }
 
-// Threads reads a range of the user's chat threads.
-// The offset specifiecs the index of the first thread
-// to fetch, starting at 0.
-// The limit specifies the maximum number of threads.
-func (s *Session) Threads(offset, limit int) (res *ThreadListResult, err error) {
+func (s *Session) Threads(limit int) (res *ThreadListResult, err error) {
 	defer essentials.AddCtxTo("fbmsgr: threads", &err)
 
 	params := map[string]interface{}{
@@ -224,15 +220,17 @@ func marshalThreadInfo(resp *ThreadResponse) *ThreadInfo {
 	}
 
 	threadInfo := &ThreadInfo{
-		ThreadID:      resp.ThreadKey.ThreadFbid,
-		ThreadFBID:    resp.ThreadKey.ThreadFbid,
+		ThreadID:      canonicalFBID(resp.ThreadKey.ThreadFbid),
+		ThreadFBID:    canonicalFBID(resp.ThreadKey.ThreadFbid),
 		OtherUserFBID: &resp.ThreadKey.OtherUserID,
 		Participants:  participantIDs,
 		UnreadCount:   resp.UnreadCount,
 		MessageCount:  resp.MessagesCount,
 	}
-	if resp.Name == "" {
+	if resp.Name == "" && len(participantIDs) == 2 {
 		threadInfo.Name = resp.AllParticipants.Nodes[0].MessagingActor.Name
+	} else if resp.Name == "" {
+		threadInfo.Name = "Unnamed Group DM"
 	} else {
 		threadInfo.Name = resp.Name
 	}
